@@ -41,7 +41,7 @@ resource "rke_cluster" "k8s" {
   cluster_name = var.cluster_name
 
   dynamic "cloud_provider" {
-    for_each = var.will_install_ccm ? [] : [1]
+    for_each = var.will_install_ccm ? [1] : []
     content {
       name = "external"
     }
