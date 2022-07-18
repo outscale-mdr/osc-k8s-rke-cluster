@@ -41,7 +41,7 @@ resource "outscale_load_balancer_vms" "backend_vms" {
 resource "outscale_load_balancer_attributes" "lb-kube-apiserver" {
   load_balancer_name = outscale_load_balancer.lb-kube-apiserver.load_balancer_name
   health_check {
-    healthy_threshold   = 10
+    healthy_threshold   = 3
     check_interval      = 30
     port                = 6443
     protocol            = "TCP"
