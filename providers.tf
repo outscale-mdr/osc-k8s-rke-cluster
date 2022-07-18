@@ -8,6 +8,11 @@ terraform {
       source  = "scottwinkler/shell"
       version = "1.7.7"
     }
+    rke = {
+      source  = "rancher/rke"
+      version = "1.3.1"
+    }
+
   }
 }
 

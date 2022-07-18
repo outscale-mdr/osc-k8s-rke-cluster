@@ -1,191 +1,88 @@
-resource "local_file" "rke_cluster_yml" {
-  filename        = "${path.root}/rke/cluster.yml"
-  file_permission = "0660"
-  content = format("%s%s%s%s",
-    "nodes:\n",
-    join("\n", [for i in range(var.control_plane_count) : format(
-      <<EOT
-- address: 10.0.1.%d
-  port: 22
-  role:
-  - controlplane
-  - etcd
-  - worker
-  hostname_override: ip-10-0-1-%d.%s.compute.internal
-  user: outscale
-  docker_socket: /var/run/docker.sock
-  ssh_key:
-  ssh_key_path: control-planes/control-plane-%d.pem
-  ssh_cert:
-  ssh_cert_path:
-  labels: {}
-  taints: []
-EOT
-    , 10 + i, 10 + i, var.region, i)]),
-    join("\n", [for i in range(var.worker_count) : format(
-      <<EOT
-- address: 10.0.1.%d
-  port: 22
-  role:
-  - worker
-  hostname_override: ip-10-0-1-%d.%s.compute.internal
-  user: outscale
-  docker_socket: /var/run/docker.sock
-  ssh_key:
-  ssh_key_path: workers/worker-%d.pem
-  ssh_cert:
-  ssh_cert_path:
-  labels: {}
-  taints: []
-EOT
-    , 19 + i, 19 + i, var.region, i)]),
+resource "rke_cluster" "k8s" {
+  depends_on = [
+    outscale_vm.control-planes,
+    local_file.control-planes-pem,
+    outscale_vm.workers,
+    local_file.workers-pem,
+    outscale_vm.bastion,
+    local_file.bastion-pem,
+    local_file.csi_secrets
+  ]
 
-    <<EOT
-services:
-  etcd:
-    image:
-    extra_args: {}
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-    external_urls: []
-    ca_cert:
-    cert:
-    key:
-    path:
-    uid: 0
-    gid: 0
-    snapshot: null
-    retention:
-    creation:
-    backup_config: null
-  kube-api:
-    image:
-    extra_args:
-      feature-gates: CSIVolumeFSGroupPolicy=true
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-    service_cluster_ip_range: 10.43.0.0/16
-    service_node_port_range:
-    pod_security_policy: false
-    always_pull_images: false
-    secrets_encryption_config: null
-    audit_log: null
-    admission_configuration: null
-    event_rate_limit: null
-  kube-controller:
-    image:
-    extra_args: {}
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-    cluster_cidr: 10.42.0.0/16
-    service_cluster_ip_range: 10.43.0.0/16
-  scheduler:
-    image:
-    extra_args: {}
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-  kubelet:
-    image:
-    extra_args:
-      feature-gates: CSIVolumeFSGroupPolicy=true
-      read-only-port: 10255
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-    cluster_domain: cluster.local
-    infra_container_image:
-    cluster_dns_server: 10.43.0.10
-    fail_swap_on: false
-    generate_serving_certificate: false
-  kubeproxy:
-    image:
-    extra_args: {}
-    extra_binds: []
-    extra_env: []
-    win_extra_args: {}
-    win_extra_binds: []
-    win_extra_env: []
-network:
-  plugin: calico
-  options: {}
-  mtu: 0
-  node_selector: {}
-  update_strategy: null
-  tolerations: []
-authentication:
-  strategy: x509
-  sans:
-${join("\n", [for i in range(var.control_plane_count) : format("   - 10.0.1.%d", 10 + i)])}
-   - ${outscale_load_balancer.lb-kube-apiserver.dns_name}
-  webhook: null
-addons:
-addons_include:
-ssh_key_path: ~/.ssh/id_rsa
-ssh_cert_path:
-ssh_agent_auth: false
-authorization:
-  mode: rbac
-  options: {}
-ignore_docker_version: null
-enable_cri_dockerd: null
-kubernetes_version: ${var.kubernetes_version}
-private_registries: []
-ingress:
-  provider:
-  options: {}
-  node_selector: {}
-  extra_args: {}
-  dns_policy:
-  extra_envs: []
-  extra_volumes: []
-  extra_volume_mounts: []
-  update_strategy: null
-  http_port: 0
-  https_port: 0
-  network_mode:
-  tolerations: []
-  default_backend: null
-  default_http_backend_priority_class_name:
-  nginx_ingress_controller_priority_class_name:
-cluster_name: ${var.cluster_name}
-cloud_provider:
-${var.will_install_ccm ? "  name: \"external\"" : ""}
-prefix_path:
-win_prefix_path:
-addon_job_timeout: 0
-monitoring:
-  provider:
-  options: {}
-  node_selector: {}
-  update_strategy: null
-  replicas: null
-  tolerations: []
-  metrics_server_priority_class_name:
-restore:
-  restore: false
-  snapshot_name:
-rotate_encryption_key: false
-dns: null
-bastion_host:
-  address: ${outscale_public_ip.bastion.public_ip}
-  port: 22
-  user: outscale
-  ssh_key_path: ${path.root}/bastion/bastion.pem
-EOT
-  )
-  depends_on = [local_file.csi_secrets]
+  services {
+    kube_api {
+      extra_args = {
+        feature-gates : "CSIVolumeFSGroupPolicy=true" // OSC CSI driver integration
+      }
+      service_cluster_ip_range = "10.43.0.0/16"
+    }
+
+    kube_controller {
+      cluster_cidr             = "10.42.0.0/16"
+      service_cluster_ip_range = "10.43.0.0/16"
+    }
+
+    kubelet {
+      extra_args = {
+        feature-gates : "CSIVolumeFSGroupPolicy=true" // OSC CSI Driver integration
+        read-only-port : "10255" // OSC CSI driver e2e , enable metrics server port
+      }
+      cluster_dns_server = "10.43.0.10"
+    }
+  }
+
+  authentication {
+    strategy = "x509"
+    sans     = concat([for i in range(var.control_plane_count) : format("10.0.1.%d", 10 + i)], ["${outscale_load_balancer.lb-kube-apiserver.dns_name}"])
+  }
+
+  kubernetes_version = var.kubernetes_version
+
+  cluster_name = var.cluster_name
+
+  dynamic "cloud_provider" {
+    for_each = var.will_install_ccm ? [] : [1]
+    content {
+      name = "external"
+    }
+  }
+
+  bastion_host {
+    address      = outscale_public_ip.bastion.public_ip
+    port         = 22
+    user         = "outscale"
+    ssh_key_path = "${abspath(path.root)}/bastion/bastion.pem"
+  }
+  dynamic "nodes" {
+    for_each = outscale_vm.control-planes
+    content {
+      address           = nodes.value.private_ip
+      hostname_override = nodes.value.private_dns_name
+      user              = "outscale"
+      role              = ["controlplane", "etcd", "worker"]
+      docker_socket     = "/var/run/docker.sock"
+      ssh_key_path      = "control-planes/control-plane-${index(outscale_vm.control-planes, nodes.value)}.pem"
+    }
+  }
+
+  dynamic "nodes" {
+    for_each = outscale_vm.workers
+    content {
+      address           = nodes.value.private_ip
+      hostname_override = nodes.value.private_dns_name
+      user              = "outscale"
+      role              = ["worker"]
+      docker_socket     = "/var/run/docker.sock"
+      ssh_key_path      = "workers/worker-${index(outscale_vm.workers, nodes.value)}.pem"
+    }
+  }
+}
+
+resource "local_sensitive_file" "kube_config_yaml" {
+  filename        = "${path.root}/rke/kube_config_cluster.yml"
+  content         = rke_cluster.k8s.kube_config_yaml
+  file_permission = "0660"
+  provisioner "local-exec" {
+    command = "sed -i 's|server:.*$|server: \"https://${outscale_load_balancer.lb-kube-apiserver.dns_name}:6443\"|' ${local_sensitive_file.kube_config_yaml.filename}"
+  }
 }
